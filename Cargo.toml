@@ -1,0 +1,10 @@
+[package]
+name = "curvecpclient"
+version = "0.1.0"
+authors = ["Sergej Pupykin <sergej.pupykin@dsr-company.com>"]
+
+[dependencies]
+rust_sodium = "~0.1.2"
+rust_sodium-sys = "~0.1.2"
+rustc-serialize = "~0.3"
+arrayref = "*"
