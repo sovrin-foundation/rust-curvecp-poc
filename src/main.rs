@@ -4,14 +4,15 @@ extern crate rustc_serialize;
 extern crate rust_sodium_sys;
 extern crate rust_sodium;
 
+#[cfg(test)]
+mod tests;
+
 use std::mem;
-use std::u64;
-use std::slice;
-use std::str;
 use std::net::UdpSocket;
-use rust_sodium_sys::*;
-use rust_sodium::randombytes::randombytes;
-use rustc_serialize::hex::{ToHex};
+//use rustc_serialize::hex::{ToHex};
+
+mod curvecp;
+use curvecp::*;
 
 const SECRETKEY:[u8; 32] = [
     0x70, 0x2d, 0x76, 0x4d, 0xe0, 0x54, 0x7c, 0x94,
@@ -30,123 +31,31 @@ const SERVER_EXT:[u8; 16] = [
     0x23, 0x84, 0x62, 0x64, 0x33, 0x83, 0x27, 0x95
 ];
 
-#[repr(packed)]
-struct ClientHello {
-    signature: [u8; 8],
-    server_ext: [u8; 16],
-    client_ext: [u8; 16],
-    client_sterm_pk: [u8; 32],
-    pad: [u8; 64],
-    nonce: [u8; 8],
-    cbox: [u8; 80]
-}
-
-#[repr(packed)]
-struct ServerCookie {
-    signature: [u8; 8],
-    client_ext: [u8; 16],
-    server_ext: [u8; 16],
-    nonce: [u8; 16],
-    cbox: [u8; 144]
-}
-
-fn randommod(n: u64) -> u64 {
-    let mut result:u64 = 0;
-    if n > 1
-    {
-        let r = randombytes(32);
-        for j in 0..32
-        {
-            result = (result * 256 + (r[j] as u64)) % n;
-        }
-    }
-    result
-}
-
 
 fn main() {
-    let mut clientlongtermpk: [u8; 32] = PUBLICKEY;
-    let mut serverlongtermpk: [u8; 32] = PUBLICKEY;
-    let mut clientlongtermsk: [u8; 32] = SECRETKEY;
-    let mut clientshorttermpk: [u8; 32] = [0; 32];
-    let mut clientshorttermsk: [u8; 32] = [0; 32];
-    let mut clientshorttermnonce: u64 = randommod(281474976710656);
-    let mut clientshortserverlong: [u8; 32] = [0; 32];
-    let mut clientlongserverlong: [u8; 32] = [0; 32];
     let socket = UdpSocket::bind("0.0.0.0:0").expect("err");
+    let mut ctx: CCPContext = CCPContext::new();
 
-    /*
-     * Send Client Hello
-     */
+    let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
 
-    clientshorttermnonce += 1;
-
-    // keys
-    unsafe {
-        crypto_box_keypair(&mut clientshorttermpk[0], &mut clientshorttermsk[0]);
-        crypto_box_beforenm(&mut clientshortserverlong[0],
-                            &mut serverlongtermpk[0],
-                            &mut clientshorttermsk[0]);
-        crypto_box_beforenm(&mut clientlongserverlong[0],
-                            &mut serverlongtermpk[0],
-                            &mut clientlongtermsk[0]);
-    }
-
-    // signature
-    let signature = String::from("QvnQ5XlH").into_bytes();
-
-    // nonce
-    let x = String::from("CurveCP-client-H________").into_bytes();
-    let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
-    for i in 0..8 {
-        nonce[16+i] = ((clientshorttermnonce >> i*8) & 0xFF) as u8;
-    }
-
-    // cbox
-    let mut ctext: [u8; 96] = [0; 96];
-    unsafe {
-        let zeros = [0; 96];
-        crypto_box_afternm(&mut ctext[0], &zeros[0], 96, &nonce[0], &clientshortserverlong[0]);
-    }
-
-    // complete ClientHello packet
-    let mut packet = ClientHello {
-        signature: *array_ref![signature.as_slice(), 0, 8],
-        server_ext: SERVER_EXT,
-        client_ext: [0; 16],
-        client_sterm_pk: clientshorttermpk,
-        pad: [0; 64],
-        nonce: *array_ref![nonce[16..], 0, 8],
-        cbox: *array_ref![ctext[16..], 0, 80]
-    };
-
-    // dump ClientHello
-    println!("sending");
-    println!("signature {}", packet.signature.to_hex());
-    println!("server_ext {}", packet.server_ext.to_hex());
-    println!("client_ext {}", packet.client_ext.to_hex());
-    println!("client_sterm_pk {}", packet.client_sterm_pk.to_hex());
-    println!("pad {}", packet.pad.to_hex());
-    println!("nonce {}", packet.nonce.to_hex());
-    println!("cbox {}", packet.cbox.to_hex());
-    println!("clientshortserverlong {}", clientshortserverlong.to_hex());
-
-    // send
-    let p: *const ClientHello = &packet;
-    let p: *const u8 = p as *const u8;
-    socket.send_to(unsafe{slice::from_raw_parts(p, mem::size_of::<ClientHello>())}, "127.0.0.1:12345");
+    let ret = ctx.mk_client_hello(&mut buf,
+                                  PUBLICKEY, SECRETKEY,
+                                  PUBLICKEY,
+                                  [0; 16], SERVER_EXT);
+    socket.send_to(&buf[0..(ret as usize)], "127.0.0.1:12345");
 
     // recv ServerCookie
-    let mut buf: [u8; 1024] = [0; 1024];
     println!("receiving");
     let (len, src) = socket.recv_from(&mut buf).unwrap();
     println!("received {} bytes from {}", len, src);
     let scookie: &ServerCookie = unsafe { mem::transmute(&buf) };
 
     // dump ServerCookie
+/*
     println!("signature {}", scookie.signature.to_hex());
     println!("client_ext {}", scookie.client_ext.to_hex());
     println!("server_ext {}", scookie.server_ext.to_hex());
     println!("nonce {}", scookie.nonce.to_hex());
     println!("cbox {}", scookie.cbox.to_hex());
+*/
 }
