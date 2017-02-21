@@ -1,7 +1,9 @@
 use std::mem;
 use std::u64;
+use std::str;
 use rust_sodium_sys::*;
 use rust_sodium::randombytes::randombytes;
+//use rustc_serialize::hex::{ToHex};
 
 pub const CCP_MAX_PACKET_SIZE:usize = 1024;
 
@@ -31,11 +33,13 @@ pub struct CCPContext {
     clientshorttermpk: [u8; 32],
     clientshorttermsk: [u8; 32],
     serverlongtermpk: [u8; 32],
+    servershorttermpk: [u8; 32],
     clientshortserverlong: [u8; 32],
     clientlongserverlong: [u8; 32],
     clientshorttermnonce: u64,
     clientext: [u8; 16],
-    serverext: [u8; 16]
+    serverext: [u8; 16],
+    servercookie: [u8; 96]
 }
 
 impl CCPContext {
@@ -46,14 +50,19 @@ impl CCPContext {
             clientshorttermpk: [0; 32],
             clientshorttermsk: [0; 32],
             serverlongtermpk: [0; 32],
+            servershorttermpk: [0; 32],
             clientshortserverlong: [0; 32],
             clientlongserverlong: [0; 32],
             clientshorttermnonce: 0,
             clientext: [0; 16],
-            serverext: [0; 16]
+            serverext: [0; 16],
+            servercookie: [0; 96]
         }
     }
 
+    /*
+     * Make client hello packet
+     */
     pub fn mk_client_hello(&mut self,
                        buf: &mut [u8; CCP_MAX_PACKET_SIZE],
                        clientlongtermpk: [u8; 32],
@@ -113,20 +122,56 @@ impl CCPContext {
         packet.nonce = *array_ref![nonce[16..], 0, 8];
         packet.cbox = *array_ref![ctext[16..], 0, 80];
 
-        // dump ClientHello
-        /*
-        println!("ClientHello");
-        println!("signature {}", packet.signature.to_hex());
-        println!("server_ext {}", packet.server_ext.to_hex());
-        println!("client_ext {}", packet.client_ext.to_hex());
-        println!("client_sterm_pk {}", packet.client_sterm_pk.to_hex());
-        println!("pad {}", packet.pad.to_hex());
-        println!("nonce {}", packet.nonce.to_hex());
-        println!("cbox {}", packet.cbox.to_hex());
-         */
-
-        // return
         return mem::size_of::<ClientHello>() as isize;
+    }
+
+    /*
+     * Parse server cookie packet
+     */
+    pub fn parse_server_cookie(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        let packet: &ServerCookie = unsafe { mem::transmute(buf) };
+        if str::from_utf8(&packet.signature).unwrap() != "RL3aNMXK" {
+            return -1;
+        }
+        if (packet.client_ext != self.clientext) ||
+           (packet.server_ext != self.serverext) {
+            return -2;
+        }
+
+        let x = String::from("CurveCPK________________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..16 {
+            nonce[8+i] = packet.nonce[i];
+        }
+
+        let mut text: [u8; 160] = [0; 160];
+        for i in 0..144 {
+            text[16+i] = packet.cbox[i];
+        }
+        unsafe {
+            if crypto_box_open_afternm(&mut text[0],
+                                       &text[0], 160,
+                                       &nonce[0],
+                                       &self.clientshortserverlong[0]) != 0 {
+                return -3;
+            }
+        }
+        self.servershorttermpk = *array_ref![text[32..], 0, 32];
+        self.servercookie = *array_ref![text[64..], 0, 96];
+
+        return size as isize;
+    }
+
+
+    /*
+     * Make client initiate packet
+     */
+    pub fn mk_client_initiate(&mut self,
+                              buf: &mut [u8; CCP_MAX_PACKET_SIZE],
+                              servername: &str,
+                              msg: &[u8]) -> isize {
+        // TODO: implement
+        return 544 + msg.len() as isize;
     }
 }
 

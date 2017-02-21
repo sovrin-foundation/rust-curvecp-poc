@@ -4,12 +4,10 @@ extern crate rustc_serialize;
 extern crate rust_sodium_sys;
 extern crate rust_sodium;
 
+use std::net::UdpSocket;
+
 #[cfg(test)]
 mod tests;
-
-use std::mem;
-use std::net::UdpSocket;
-//use rustc_serialize::hex::{ToHex};
 
 mod curvecp;
 use curvecp::*;
@@ -31,6 +29,8 @@ const SERVER_EXT:[u8; 16] = [
     0x23, 0x84, 0x62, 0x64, 0x33, 0x83, 0x27, 0x95
 ];
 
+const SERVER_ADDR:&'static str = "127.0.0.1:12345";
+const SERVER_NAME:&'static str = "machine.example.com";
 
 fn main() {
     let socket = UdpSocket::bind("0.0.0.0:0").expect("err");
@@ -42,20 +42,20 @@ fn main() {
                                   PUBLICKEY, SECRETKEY,
                                   PUBLICKEY,
                                   [0; 16], SERVER_EXT);
-    socket.send_to(&buf[0..(ret as usize)], "127.0.0.1:12345");
+    socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 
     // recv ServerCookie
     println!("receiving");
     let (len, src) = socket.recv_from(&mut buf).unwrap();
     println!("received {} bytes from {}", len, src);
-    let scookie: &ServerCookie = unsafe { mem::transmute(&buf) };
+    // TODO: check ip:port
+    if ctx.parse_server_cookie(&buf, len) < 0 {
+        println!("server cookie parsing failed");
+    }
 
-    // dump ServerCookie
-/*
-    println!("signature {}", scookie.signature.to_hex());
-    println!("client_ext {}", scookie.client_ext.to_hex());
-    println!("server_ext {}", scookie.server_ext.to_hex());
-    println!("nonce {}", scookie.nonce.to_hex());
-    println!("cbox {}", scookie.cbox.to_hex());
-*/
+    
+    let ret = ctx.mk_client_initiate(&mut buf,
+                                     SERVER_NAME,
+                                     String::from("TEST").into_bytes().as_slice());
+    socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 }

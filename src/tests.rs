@@ -20,9 +20,10 @@ pub mod tests {
         0x31, 0x41, 0x59, 0x26, 0x53, 0x58, 0x97, 0x93,
         0x23, 0x84, 0x62, 0x64, 0x33, 0x83, 0x27, 0x95
     ];
+    const SERVER_NAME:&'static str = "machine.example.com";
 
     #[test]
-    fn test1() {
+    fn test_mk_client_hello() {
         let mut ctx: CCPContext = CCPContext::new();
         let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
         let ret = ctx.mk_client_hello(&mut buf,
@@ -30,5 +31,22 @@ pub mod tests {
                                       PUBLICKEY,
                                       [0; 16], SERVER_EXT);
         assert!(ret == 224)
+    }
+
+    #[test]
+    fn test_parse_server_cookie() {
+        assert!(true) // TODO: implement
+    }
+
+    #[test]
+    fn test_mk_client_initiate() {
+        let mut ctx: CCPContext = CCPContext::new();
+        let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
+        let msg = String::from("TEST").into_bytes();
+        let msg = msg.as_slice();
+        let ret = ctx.mk_client_initiate(&mut buf,
+                                         SERVER_NAME,
+                                         msg);
+        assert!(ret == 544 + msg.len() as isize)
     }
 }
