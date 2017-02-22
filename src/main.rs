@@ -10,7 +10,10 @@ use std::net::UdpSocket;
 mod tests;
 
 mod curvecp;
+mod utils;
+
 use curvecp::*;
+//use utils::*;
 
 const SECRETKEY:[u8; 32] = [
     0x70, 0x2d, 0x76, 0x4d, 0xe0, 0x54, 0x7c, 0x94,
@@ -42,6 +45,10 @@ fn main() {
                                   PUBLICKEY, SECRETKEY,
                                   PUBLICKEY,
                                   [0; 16], SERVER_EXT);
+    if ret < 0 {
+        println!("mk_client_hello failure!");
+        return;
+    }
     socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 
     // recv ServerCookie
@@ -51,11 +58,16 @@ fn main() {
     // TODO: check ip:port
     if ctx.parse_server_cookie(&buf, len) < 0 {
         println!("server cookie parsing failed");
+        return;
     }
 
     
     let ret = ctx.mk_client_initiate(&mut buf,
                                      SERVER_NAME,
-                                     String::from("TEST").into_bytes().as_slice());
+                                     String::from("TESTTESTTESTTEST").into_bytes().as_slice());
+    if ret < 0 {
+        println!("mk_client_initiate failure!");
+        return;
+    }
     socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 }

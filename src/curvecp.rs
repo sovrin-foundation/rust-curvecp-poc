@@ -5,7 +5,14 @@ use rust_sodium_sys::*;
 use rust_sodium::randombytes::randombytes;
 //use rustc_serialize::hex::{ToHex};
 
-pub const CCP_MAX_PACKET_SIZE:usize = 1024;
+use utils::*;
+
+// TODO: implement safenonce
+
+pub const CCP_MAX_PACKET_SIZE:usize = 1184;
+pub const CCP_MAX_CLIENT_INIT_PAYLOAD_SIZE:usize = 640;
+pub const CCP_MAX_CLIENT_INIT_CBOX_SIZE:usize = 640 + 368;
+pub const CCP_MAX_MESSAGE_SIZE:usize = 1088;
 
 #[repr(packed)]
 pub struct ClientHello {
@@ -27,6 +34,17 @@ pub struct ServerCookie {
     cbox: [u8; 144]
 }
 
+#[repr(packed)]
+pub struct ClientInitiate {
+    signature: [u8; 8],
+    server_ext: [u8; 16],
+    client_ext: [u8; 16],
+    client_sterm_pk: [u8; 32],
+    servercookie: [u8; 96],
+    nonce: [u8; 8],
+    cbox: [u8; CCP_MAX_CLIENT_INIT_CBOX_SIZE]
+}
+
 pub struct CCPContext {
     clientlongtermpk: [u8; 32],
     clientlongtermsk: [u8; 32],
@@ -35,6 +53,7 @@ pub struct CCPContext {
     serverlongtermpk: [u8; 32],
     servershorttermpk: [u8; 32],
     clientshortserverlong: [u8; 32],
+    clientshortservershort: [u8; 32],
     clientlongserverlong: [u8; 32],
     clientshorttermnonce: u64,
     clientext: [u8; 16],
@@ -52,6 +71,7 @@ impl CCPContext {
             serverlongtermpk: [0; 32],
             servershorttermpk: [0; 32],
             clientshortserverlong: [0; 32],
+            clientshortservershort: [0; 32],
             clientlongserverlong: [0; 32],
             clientshorttermnonce: 0,
             clientext: [0; 16],
@@ -170,19 +190,83 @@ impl CCPContext {
                               buf: &mut [u8; CCP_MAX_PACKET_SIZE],
                               servername: &str,
                               msg: &[u8]) -> isize {
-        // TODO: implement
+        if msg.len() < 16 || msg.len() > CCP_MAX_CLIENT_INIT_PAYLOAD_SIZE {
+            return -1;
+        }
+        if servername.len() > 256 {
+            return -2;
+        }
+        
+        // signature
+        let signature = String::from("QvnQ5XlI").into_bytes();
+
+        let packet: &mut ClientInitiate = unsafe { mem::transmute(buf) };
+        packet.signature = *array_ref![signature.as_slice(), 0, 8];
+        packet.server_ext = self.serverext;
+        packet.client_ext = self.clientext;
+        packet.client_sterm_pk = self.clientshorttermpk;
+        packet.servercookie = self.servercookie;
+
+        // vouch
+        let x = String::from("CurveCPV________________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        let r = randombytes(16);
+        for i in 0..16 {
+            nonce[8+i] = r[i];
+        }
+        let mut text: [u8; 64] = [0; 64];
+        for i in 0..32 {
+            text[32+i] = self.clientshorttermpk[i];
+        }
+        unsafe {
+            crypto_box_afternm(&mut text[0],
+                               &text[0], 64,
+                               &nonce[0],
+                               &self.clientlongserverlong[0]);
+        }
+        let mut vouch: [u8; 64] = [0; 64];
+        for i in 0..16 {
+            vouch[i] = nonce[8+i];
+        }
+        for i in 0..48 {
+            vouch[16+i] = text[16+i];
+        }
+
+        // nonce
+        self.clientshorttermnonce += 1;
+        let x = String::from("CurveCP-client-I________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = ((self.clientshorttermnonce >> i*8) & 0xFF) as u8;
+        }
+        packet.nonce = *array_ref![nonce[16..], 0, 8];
+
+        // cbox
+        let mut text: [u8; 16 + CCP_MAX_CLIENT_INIT_CBOX_SIZE] = [0; 16 + CCP_MAX_CLIENT_INIT_CBOX_SIZE];
+        for i in 0..32 {
+            text[32+i] = self.clientlongtermpk[i];
+        }
+        for i in 0..64 {
+            text[64+i] = vouch[i];
+        }
+        let x = nameparse(servername);
+        for i in 0..x.len() {
+            text[128+i] = x[i];
+        }
+        for i in 0..msg.len() {
+            text[384+i] = msg[i];
+        }
+        unsafe {
+            crypto_box_beforenm(&mut self.clientshortservershort[0],
+                                &self.servershorttermpk[0],
+                                &self.clientshorttermsk[0]);
+            crypto_box_afternm(&mut text[0],
+                               &text[0], (msg.len() + 384) as u64,
+                               &nonce[0],
+                               &self.clientshortservershort[0]);
+        }
+        packet.cbox = *array_ref![text[16..], 0, CCP_MAX_CLIENT_INIT_CBOX_SIZE];
+
         return 544 + msg.len() as isize;
     }
-}
-
-
-pub fn randommod(n: u64) -> u64 {
-    let mut result:u64 = 0;
-    if n > 1 {
-        let r = randombytes(32);
-        for j in 0..32 {
-            result = (result * 256 + (r[j] as u64)) % n;
-        }
-    }
-    result
 }
