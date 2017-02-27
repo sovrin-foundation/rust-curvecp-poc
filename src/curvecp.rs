@@ -9,10 +9,10 @@ use utils::*;
 
 // TODO: implement safenonce
 
-pub const CCP_MAX_PACKET_SIZE:usize = 1184;
+pub const CCP_MAX_PACKET_SIZE:usize = 1152;
 pub const CCP_MAX_CLIENT_INIT_PAYLOAD_SIZE:usize = 640;
 pub const CCP_MAX_CLIENT_INIT_CBOX_SIZE:usize = 640 + 368;
-pub const CCP_MAX_MESSAGE_SIZE:usize = 1088;
+pub const CCP_MAX_MESSAGE_SIZE:usize = 1104;
 
 #[repr(packed)]
 pub struct ClientHello {
@@ -43,6 +43,25 @@ pub struct ClientInitiate {
     servercookie: [u8; 96],
     nonce: [u8; 8],
     cbox: [u8; CCP_MAX_CLIENT_INIT_CBOX_SIZE]
+}
+
+#[repr(packed)]
+pub struct ServerMessage {
+    signature: [u8; 8],
+    client_ext: [u8; 16],
+    server_ext: [u8; 16],
+    nonce: [u8; 8],
+    cbox: [u8; CCP_MAX_MESSAGE_SIZE + 16]
+}
+
+#[repr(packed)]
+pub struct ClientMessage {
+    signature: [u8; 8],
+    server_ext: [u8; 16],
+    client_ext: [u8; 16],
+    client_sterm_pk: [u8; 32],
+    nonce: [u8; 8],
+    cbox: [u8; CCP_MAX_MESSAGE_SIZE + 16]
 }
 
 pub struct CCPContext {
@@ -196,7 +215,7 @@ impl CCPContext {
         if servername.len() > 256 {
             return -2;
         }
-        
+
         // signature
         let signature = String::from("QvnQ5XlI").into_bytes();
 
@@ -268,5 +287,104 @@ impl CCPContext {
         packet.cbox = *array_ref![text[16..], 0, CCP_MAX_CLIENT_INIT_CBOX_SIZE];
 
         return 544 + msg.len() as isize;
+    }
+
+    /*
+     * Parse server message
+     */
+    pub fn parse_server_message(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        let packet: &ServerMessage = unsafe { mem::transmute(buf) };
+        if str::from_utf8(&packet.signature).unwrap() != "RL3aNMXM" {
+            return -1;
+        }
+        if (packet.client_ext != self.clientext) ||
+           (packet.server_ext != self.serverext) {
+            return -2;
+        }
+
+        let x = String::from("CurveCP-server-M________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = packet.nonce[i];
+        }
+
+        let mut text: [u8; CCP_MAX_MESSAGE_SIZE + 16] = [0; CCP_MAX_MESSAGE_SIZE + 16];
+        for i in 0..size-48 {
+            text[16+i] = packet.cbox[i];
+        }
+        unsafe {
+            if crypto_box_open_afternm(&mut text[0],
+                                       &text[0], (size-48+16) as u64,
+                                       &nonce[0],
+                                       &self.clientshortservershort[0]) != 0 {
+                return -3;
+            }
+        }
+
+        println!("ServerMessage: {}", str::from_utf8(&text).unwrap());
+
+        return size as isize;
+    }
+
+    /*
+     * Make client message packet
+     */
+    pub fn mk_client_message(&mut self,
+                             buf: &mut [u8; CCP_MAX_PACKET_SIZE],
+                             msg: &[u8]) -> isize {
+        if msg.len() < 16 || msg.len() > CCP_MAX_MESSAGE_SIZE {
+            return -1;
+        }
+
+        // signature
+        let signature = String::from("QvnQ5XlM").into_bytes();
+
+        let packet: &mut ClientMessage = unsafe { mem::transmute(buf) };
+        packet.signature = *array_ref![signature.as_slice(), 0, 8];
+        packet.server_ext = self.serverext;
+        packet.client_ext = self.clientext;
+        packet.client_sterm_pk = self.clientshorttermpk;
+
+        // message
+        let x = String::from("CurveCP-client-M________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        let r = randombytes(16);
+        for i in 0..8 {
+            nonce[16+i] = r[i];
+        }
+        let mut text: [u8; 64] = [0; 64];
+        for i in 0..32 {
+            text[32+i] = self.clientshorttermpk[i];
+        }
+        unsafe {
+            crypto_box_afternm(&mut text[0],
+                               &text[0], 64,
+                               &nonce[0],
+                               &self.clientshortservershort[0]);
+        }
+
+        // nonce
+        self.clientshorttermnonce += 1;
+        let x = String::from("CurveCP-client-I________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = ((self.clientshorttermnonce >> i*8) & 0xFF) as u8;
+        }
+        packet.nonce = *array_ref![nonce[16..], 0, 8];
+
+        // cbox
+        let mut text: [u8; 32 + CCP_MAX_MESSAGE_SIZE] = [0; 32 + CCP_MAX_MESSAGE_SIZE];
+        for i in 0..msg.len() {
+            text[32+i] = msg[i];
+        }
+        unsafe {
+            crypto_box_afternm(&mut text[0],
+                               &text[0], (msg.len() + 32) as u64,
+                               &nonce[0],
+                               &self.clientshortservershort[0]);
+        }
+        packet.cbox = *array_ref![text[16..], 0, CCP_MAX_MESSAGE_SIZE + 16];
+
+        return 80 + msg.len() as isize;
     }
 }
