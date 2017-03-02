@@ -67,8 +67,9 @@ pub struct CCPContext {
     clientlongtermsk: [u8; 32],
     clientshorttermpk: [u8; 32],
     clientshorttermsk: [u8; 32],
-    serverlongtermpk: [u8; 32],
     servershorttermpk: [u8; 32],
+    servershorttermsk: [u8; 32],
+    serverlongtermpk: [u8; 32],
     clientshortserverlong: [u8; 32],
     clientshortservershort: [u8; 32],
     clientlongserverlong: [u8; 32],
@@ -85,8 +86,9 @@ impl CCPContext {
             clientlongtermsk: [0; 32],
             clientshorttermpk: [0; 32],
             clientshorttermsk: [0; 32],
-            serverlongtermpk: [0; 32],
             servershorttermpk: [0; 32],
+            servershorttermsk: [0; 32],
+            serverlongtermpk: [0; 32],
             clientshortserverlong: [0; 32],
             clientshortservershort: [0; 32],
             clientlongserverlong: [0; 32],
@@ -420,9 +422,55 @@ impl CCPContext {
         }
 
         // ignore content, it is client_sterm_pk + [0; 64]
-        
-        println!("ClientHello");
+
         return size as isize;
+    }
+
+
+    /*
+     * Make server cookie packet
+     */
+    pub fn mk_server_cookie(&mut self,
+                            buf: &mut [u8; CCP_MAX_PACKET_SIZE]) -> isize {
+        // signature
+        let signature = String::from("RL3aNMXK").into_bytes();
+
+        let packet: &mut ServerCookie = unsafe { mem::transmute(buf) };
+        packet.signature = *array_ref![signature.as_slice(), 0, 8];
+        packet.server_ext = self.serverext;
+        packet.client_ext = self.clientext;
+
+        // nonce
+        self.clientshorttermnonce += 1;
+        let x = String::from("CurveCPKminute-k________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        let r = randombytes(8); // FIXME: ???
+        for i in 0..8 {
+            nonce[16+i] = r[i];
+        }
+        packet.nonce = *array_ref![nonce[8..], 0, 16];
+
+        unsafe {
+            crypto_box_keypair(&mut self.servershorttermpk[0],
+                               &mut self.servershorttermsk[0]);
+        }
+
+        // cbox
+        let mut text: [u8; 160] = [0; 160];
+        for i in 0..32 {
+            text[32+i] = self.servershorttermpk[i];
+        }
+        for i in 0..16 {
+            text[64+i] = nonce[8+i];
+        }
+        unsafe {
+            crypto_box_afternm(&mut text[0],
+                               &text[0], 160,
+                               &nonce[0],
+                               &self.clientshortserverlong[0]);
+        }
+        packet.cbox = *array_ref![text[16..], 0, 144];
+        return mem::size_of::<ServerCookie>() as isize;
     }
 
 
@@ -439,15 +487,6 @@ impl CCPContext {
      */
     pub fn parse_client_message(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
         return size as isize;
-    }
-
-
-    /*
-     * Make server cookie packet
-     */
-    pub fn mk_server_cookie(&mut self,
-                            buf: &mut [u8; CCP_MAX_PACKET_SIZE]) -> isize {
-        return 0;
     }
 
 
@@ -485,7 +524,6 @@ pub fn nameparse(source: &str) -> Vec<u8> {
             j += 1;
         }
         dst.push((j - s) as u8);
-        // println!("nameparse: count {}", j - s);
         while s < src.len() && src[s] != '.' as u8 {
             dst.push(src[s]);
             s += 1;
@@ -494,7 +532,5 @@ pub fn nameparse(source: &str) -> Vec<u8> {
             s += 1;
         }
     }
-    // println!("nameparse: str {}", String::from_utf8(dst.clone()).unwrap());
-    // println!("nameparse: hex {}", dst.to_hex());
     return dst;
 }

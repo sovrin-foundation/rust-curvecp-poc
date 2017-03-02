@@ -35,6 +35,7 @@ fn main() {
     let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
 
     // send ClientHello
+    println!("send mk_client_hello");
     let ret = ctx.mk_client_hello(&mut buf,
                                   PUBLICKEY, SECRETKEY,
                                   PUBLICKEY,
@@ -46,7 +47,7 @@ fn main() {
     socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 
     // recv ServerCookie
-    println!("receiving");
+    println!("receiving ServerCookie");
     let (len, src) = socket.recv_from(&mut buf).unwrap();
     println!("received {} bytes from {}", len, src);
     // TODO: check ip:port
@@ -56,6 +57,7 @@ fn main() {
     }
 
     // send ClientInitiate
+    println!("send mk_client_initiate");
     let ret = ctx.mk_client_initiate(&mut buf,
                                      SERVER_NAME,
                                      String::from("TESTTESTTESTTEST").into_bytes().as_slice());
@@ -66,7 +68,7 @@ fn main() {
     socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
 
     // recv ServerMessage
-    println!("receiving");
+    println!("receiving ServerMessage");
     let (len, src) = socket.recv_from(&mut buf).unwrap();
     println!("received {} bytes from {}", len, src);
     // TODO: check ip:port
@@ -76,6 +78,7 @@ fn main() {
     }
 
     // send ClientMessage
+    println!("send mk_client_message");
     let ret = ctx.mk_client_message(&mut buf,
                                     String::from("TESTTESTTESTTESTTESTTESTTESTTESTTESTTESTTESTTEST").into_bytes().as_slice());
     if ret < 0 {
