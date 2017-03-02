@@ -1,7 +1,15 @@
 [package]
-name = "curvecpclient"
+name = "curvecp"
 version = "0.1.0"
 authors = ["Sergej Pupykin <sergej.pupykin@dsr-company.com>"]
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
 
 [dependencies]
 rust_sodium = "~0.1.2"

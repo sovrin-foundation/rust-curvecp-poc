@@ -5,15 +5,8 @@ extern crate rust_sodium_sys;
 extern crate rust_sodium;
 
 use std::net::UdpSocket;
-
-#[cfg(test)]
-mod tests;
-
-mod curvecp;
-mod utils;
-
-use curvecp::*;
-//use utils::*;
+mod libcurvecp;
+use libcurvecp::*;
 
 const SECRETKEY:[u8; 32] = [
     0x70, 0x2d, 0x76, 0x4d, 0xe0, 0x54, 0x7c, 0x94,

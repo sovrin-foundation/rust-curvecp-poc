@@ -1,13 +1,11 @@
+// TODO: implement safenonce
+
 use std::mem;
 use std::u64;
 use std::str;
 use rust_sodium_sys::*;
 use rust_sodium::randombytes::randombytes;
 //use rustc_serialize::hex::{ToHex};
-
-use utils::*;
-
-// TODO: implement safenonce
 
 pub const CCP_MAX_PACKET_SIZE:usize = 1152;
 pub const CCP_MAX_CLIENT_INIT_PAYLOAD_SIZE:usize = 640;
@@ -345,27 +343,9 @@ impl CCPContext {
         packet.client_ext = self.clientext;
         packet.client_sterm_pk = self.clientshorttermpk;
 
-        // message
-        let x = String::from("CurveCP-client-M________").into_bytes();
-        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
-        let r = randombytes(16);
-        for i in 0..8 {
-            nonce[16+i] = r[i];
-        }
-        let mut text: [u8; 64] = [0; 64];
-        for i in 0..32 {
-            text[32+i] = self.clientshorttermpk[i];
-        }
-        unsafe {
-            crypto_box_afternm(&mut text[0],
-                               &text[0], 64,
-                               &nonce[0],
-                               &self.clientshortservershort[0]);
-        }
-
         // nonce
         self.clientshorttermnonce += 1;
-        let x = String::from("CurveCP-client-I________").into_bytes();
+        let x = String::from("CurveCP-client-M________").into_bytes();
         let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
         for i in 0..8 {
             nonce[16+i] = ((self.clientshorttermnonce >> i*8) & 0xFF) as u8;
@@ -385,6 +365,87 @@ impl CCPContext {
         }
         packet.cbox = *array_ref![text[16..], 0, CCP_MAX_MESSAGE_SIZE + 16];
 
-        return 80 + msg.len() as isize;
+        return 96 + msg.len() as isize;
     }
+
+
+    /*
+     * Parse client hello
+     */
+    pub fn parse_client_hello(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        return size as isize;
+    }
+
+
+    /*
+     * Parse client initiate
+     */
+    pub fn parse_client_initiate(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        return size as isize;
+    }
+
+
+    /*
+     * Parse client message
+     */
+    pub fn parse_client_message(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        return size as isize;
+    }
+
+
+    /*
+     * Make server cookie packet
+     */
+    pub fn mk_server_cookie(&mut self,
+                            buf: &mut [u8; CCP_MAX_PACKET_SIZE]) -> isize {
+        return 0;
+    }
+
+
+    /*
+     * Make server message packet
+     */
+    pub fn mk_server_message(&mut self,
+                             buf: &mut [u8; CCP_MAX_PACKET_SIZE],
+                             msg: &[u8]) -> isize {
+        return 0;
+    }
+}
+
+
+
+
+pub fn randommod(n: u64) -> u64 {
+    let mut result:u64 = 0;
+    if n > 1 {
+        let r = randombytes(32);
+        for j in 0..32 {
+            result = (result * 256 + (r[j] as u64)) % n;
+        }
+    }
+    result
+}
+
+pub fn nameparse(source: &str) -> Vec<u8> {
+    let src = String::from(source).into_bytes();
+    let mut dst: Vec<u8> = vec![];
+    let mut s = 0;
+    while s < src.len() {
+        let mut j = s;
+        while j < src.len() && src[j] != '.' as u8 {
+            j += 1;
+        }
+        dst.push((j - s) as u8);
+        // println!("nameparse: count {}", j - s);
+        while s < src.len() && src[s] != '.' as u8 {
+            dst.push(src[s]);
+            s += 1;
+        }
+        if s < src.len() && src[s] == '.' as u8 {
+            s += 1;
+        }
+    }
+    // println!("nameparse: str {}", String::from_utf8(dst.clone()).unwrap());
+    // println!("nameparse: hex {}", dst.to_hex());
+    return dst;
 }
