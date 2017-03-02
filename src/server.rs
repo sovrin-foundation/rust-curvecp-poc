@@ -29,16 +29,16 @@ const SERVER_ADDR:&'static str = "127.0.0.1:12345";
 const SERVER_NAME:&'static str = "machine.example.com";
 
 fn main() {
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("err");
+    let socket = UdpSocket::bind(SERVER_ADDR).expect("err");
     let mut ctx: CCPContext = CCPContext::new();
 
     let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
 
     // recv ClientHello
     println!("receiving");
-    let (len, src) = socket.recv_from(&mut buf).unwrap();
-    println!("received {} bytes from {}", len, src);
-    if ctx.parse_client_hello(&buf, len) < 0 {
+    let (len, client_ip) = socket.recv_from(&mut buf).unwrap();
+    println!("received {} bytes from {}", len, client_ip);
+    if ctx.parse_client_hello(SERVER_EXT, PUBLICKEY, SECRETKEY, &buf, len) < 0 {
         println!("client hello parsing failed");
         return;
     }
@@ -49,7 +49,7 @@ fn main() {
         println!("mk_server_cookie failure!");
         return;
     }
-    socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
+    socket.send_to(&buf[0..(ret as usize)], client_ip).expect("err");
 
     // recv ClientInitiate
     println!("receiving");
@@ -67,7 +67,7 @@ fn main() {
         println!("mk_server_message failure!");
         return;
     }
-    socket.send_to(&buf[0..(ret as usize)], SERVER_ADDR).expect("err");
+    socket.send_to(&buf[0..(ret as usize)], client_ip).expect("err");
 
     // recv ClientMessage
     println!("receiving");

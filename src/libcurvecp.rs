@@ -372,7 +372,56 @@ impl CCPContext {
     /*
      * Parse client hello
      */
-    pub fn parse_client_hello(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+    pub fn parse_client_hello(&mut self,
+                              serverext: [u8; 16],
+                              serverlongtermpk: [u8; 32],
+                              serverlongtermsk: [u8; 32],
+                              buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        // init
+        self.serverext = serverext;
+        self.serverlongtermpk = serverlongtermpk;
+
+        // parse
+        let packet: &ClientHello = unsafe { mem::transmute(buf) };
+        if str::from_utf8(&packet.signature).unwrap() != "QvnQ5XlH" {
+            return -1;
+        }
+        if packet.server_ext != self.serverext {
+            return -2;
+        }
+
+        // nonce
+        let x = String::from("CurveCP-client-H________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = packet.nonce[i];
+        }
+
+        // client_sterm_pk
+        self.clientshorttermpk = packet.client_sterm_pk;
+        unsafe {
+            crypto_box_beforenm(&mut self.clientshortserverlong[0],
+                                &self.clientshorttermpk[0],
+                                &serverlongtermsk[0]);
+        }
+
+        // cbox
+        let mut text: [u8; 96] = [0; 96];
+        for i in 0..80 {
+            text[16+i] = packet.cbox[i];
+        }
+        unsafe {
+            if crypto_box_open_afternm(&mut text[0],
+                                       &text[0], 96,
+                                       &nonce[0],
+                                       &self.clientshortserverlong[0]) != 0 {
+                return -3;
+            }
+        }
+
+        // ignore content, it is client_sterm_pk + [0; 64]
+        
+        println!("ClientHello");
         return size as isize;
     }
 
