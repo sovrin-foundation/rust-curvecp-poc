@@ -70,6 +70,7 @@ pub struct CCPContext {
     servershorttermpk: [u8; 32],
     servershorttermsk: [u8; 32],
     serverlongtermpk: [u8; 32],
+    serverlongtermsk: [u8; 32],
     clientshortserverlong: [u8; 32],
     clientshortservershort: [u8; 32],
     clientlongserverlong: [u8; 32],
@@ -89,6 +90,7 @@ impl CCPContext {
             servershorttermpk: [0; 32],
             servershorttermsk: [0; 32],
             serverlongtermpk: [0; 32],
+            serverlongtermsk: [0; 32],
             clientshortserverlong: [0; 32],
             clientshortservershort: [0; 32],
             clientlongserverlong: [0; 32],
@@ -375,13 +377,14 @@ impl CCPContext {
      * Parse client hello
      */
     pub fn parse_client_hello(&mut self,
-                              serverext: [u8; 16],
+                              buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize,
                               serverlongtermpk: [u8; 32],
                               serverlongtermsk: [u8; 32],
-                              buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+                              serverext: [u8; 16]) -> isize {
         // init
         self.serverext = serverext;
         self.serverlongtermpk = serverlongtermpk;
+        self.serverlongtermsk = serverlongtermsk;
 
         // parse
         let packet: &ClientHello = unsafe { mem::transmute(buf) };
@@ -406,6 +409,8 @@ impl CCPContext {
                                 &self.clientshorttermpk[0],
                                 &serverlongtermsk[0]);
         }
+
+        self.clientext = packet.client_ext;
 
         // cbox
         let mut text: [u8; 96] = [0; 96];
@@ -478,6 +483,52 @@ impl CCPContext {
      * Parse client initiate
      */
     pub fn parse_client_initiate(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        let packet: &ClientInitiate = unsafe { mem::transmute(buf) };
+        if str::from_utf8(&packet.signature).unwrap() != "QvnQ5XlI" {
+            return -1;
+        }
+        if packet.server_ext != self.serverext {
+            return -2;
+        }
+
+        // nonce
+        let x = String::from("CurveCP-client-I________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = packet.nonce[i];
+        }
+
+        unsafe {
+            crypto_box_beforenm(&mut self.clientshortservershort[0],
+                                &self.clientshorttermpk[0],
+                                &self.servershorttermsk[0]);
+        }
+
+        // cbox
+        let mut text: [u8; 16 + CCP_MAX_CLIENT_INIT_CBOX_SIZE] = [0; 16 + CCP_MAX_CLIENT_INIT_CBOX_SIZE];
+        for i in 0..(size - 160) {
+            text[16+i] = packet.cbox[i];
+        }
+        unsafe {
+            if crypto_box_open_afternm(&mut text[0],
+                                       &text[0], (size - 160) as u64,
+                                       &nonce[0],
+                                       &self.clientshortservershort[0]) != 0 {
+                return -3;
+            }
+        }
+        for i in 0..32 {
+            self.clientlongtermpk[i] = text[32+i];
+        }
+
+        // TODO: check server name
+
+        unsafe {
+            crypto_box_beforenm(&mut self.clientlongserverlong[0],
+                                &self.clientlongtermpk[0],
+                                &self.serverlongtermsk[0]);
+        }
+
         return size as isize;
     }
 
@@ -486,6 +537,37 @@ impl CCPContext {
      * Parse client message
      */
     pub fn parse_client_message(&mut self, buf: &[u8; CCP_MAX_PACKET_SIZE], size: usize) -> isize {
+        let packet: &ClientMessage = unsafe { mem::transmute(buf) };
+        if str::from_utf8(&packet.signature).unwrap() != "QvnQ5XlM" {
+            return -1;
+        }
+        if packet.server_ext != self.serverext {
+            return -2;
+        }
+
+        // nonce
+        let x = String::from("CurveCP-client-M________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = packet.nonce[i];
+        }
+
+        // cbox
+        let mut text: [u8; CCP_MAX_MESSAGE_SIZE + 16] = [0; CCP_MAX_MESSAGE_SIZE + 16];
+        for i in 0..size-80 {
+            text[16+i] = packet.cbox[i];
+        }
+        unsafe {
+            if crypto_box_open_afternm(&mut text[0],
+                                       &text[0], (size-80+16) as u64,
+                                       &nonce[0],
+                                       &self.clientshortservershort[0]) != 0 {
+                return -3;
+            }
+        }
+
+        println!("ClientMessage: {}", str::from_utf8(&text).unwrap());
+
         return size as isize;
     }
 
@@ -496,7 +578,41 @@ impl CCPContext {
     pub fn mk_server_message(&mut self,
                              buf: &mut [u8; CCP_MAX_PACKET_SIZE],
                              msg: &[u8]) -> isize {
-        return 0;
+        if msg.len() < 16 || msg.len() > CCP_MAX_MESSAGE_SIZE {
+            return -1;
+        }
+
+        // signature
+        let signature = String::from("RL3aNMXM").into_bytes();
+
+        let packet: &mut ServerMessage = unsafe { mem::transmute(buf) };
+        packet.signature = *array_ref![signature.as_slice(), 0, 8];
+        packet.server_ext = self.serverext;
+        packet.client_ext = self.clientext;
+
+        // nonce
+        self.clientshorttermnonce += 1;
+        let x = String::from("CurveCP-server-M________").into_bytes();
+        let mut nonce: [u8; 24]  = *array_ref![x.as_slice(), 0, 24];
+        for i in 0..8 {
+            nonce[16+i] = ((self.clientshorttermnonce >> i*8) & 0xFF) as u8;
+        }
+        packet.nonce = *array_ref![nonce[16..], 0, 8];
+
+        // cbox
+        let mut text: [u8; 32 + CCP_MAX_MESSAGE_SIZE] = [0; 32 + CCP_MAX_MESSAGE_SIZE];
+        for i in 0..msg.len() {
+            text[32+i] = msg[i];
+        }
+        unsafe {
+            crypto_box_afternm(&mut text[0],
+                               &text[0], (msg.len() + 32) as u64,
+                               &nonce[0],
+                               &self.clientshortservershort[0]);
+        }
+        packet.cbox = *array_ref![text[16..], 0, CCP_MAX_MESSAGE_SIZE + 16];
+
+        return 64 + msg.len() as isize;
     }
 }
 

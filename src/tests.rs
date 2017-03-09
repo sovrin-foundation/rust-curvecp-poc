@@ -2,7 +2,8 @@
 
 pub mod tests {
 
-    use curvecp::*;
+    use std::mem;
+    use libcurvecp::*;
 
     const SECRETKEY:[u8; 32] = [
         0x70, 0x2d, 0x76, 0x4d, 0xe0, 0x54, 0x7c, 0x94,
@@ -23,30 +24,70 @@ pub mod tests {
     const SERVER_NAME:&'static str = "machine.example.com";
 
     #[test]
-    fn test_mk_client_hello() {
+    fn test_client_hello() {
         let mut ctx: CCPContext = CCPContext::new();
         let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
-        let ret = ctx.mk_client_hello(&mut buf,
-                                      PUBLICKEY, SECRETKEY,
-                                      PUBLICKEY,
-                                      [0; 16], SERVER_EXT);
+        let mut ret = ctx.mk_client_hello(&mut buf,
+                                          PUBLICKEY, SECRETKEY,
+                                          PUBLICKEY,
+                                          [0; 16], SERVER_EXT);
+        if ret > 0 {
+            ret = ctx.parse_client_hello(&buf, ret as usize, PUBLICKEY, SECRETKEY, SERVER_EXT);
+        }
         assert!(ret == 224)
     }
 
     #[test]
-    fn test_parse_server_cookie() {
-        assert!(true) // TODO: implement
+    fn test_client_initiate() {
+        let mut ctx: CCPContext = CCPContext::new();
+        let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
+        let msg = String::from("TESTTESTTESTTEST").into_bytes();
+        let msg = msg.as_slice();
+        let mut ret = ctx.mk_client_initiate(&mut buf,
+                                             SERVER_NAME,
+                                             msg);
+        if ret > 0 {
+            ret = ctx.parse_client_initiate(&buf, ret as usize);
+        }
+        assert!(ret == 544 + msg.len() as isize);
     }
 
     #[test]
-    fn test_mk_client_initiate() {
+    fn test_client_message() {
         let mut ctx: CCPContext = CCPContext::new();
         let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
-        let msg = String::from("TEST").into_bytes();
+        let msg = String::from("TESTTESTTESTTEST").into_bytes();
         let msg = msg.as_slice();
-        let ret = ctx.mk_client_initiate(&mut buf,
-                                         SERVER_NAME,
-                                         msg);
-        assert!(ret == 544 + msg.len() as isize)
+        let mut ret = ctx.mk_client_message(&mut buf,
+                                            msg);
+        if ret > 0 {
+            ret = ctx.parse_client_message(&buf, ret as usize);
+        }
+        assert!(ret == 96 + msg.len() as isize);
+    }
+
+    #[test]
+    fn test_server_cookie() {
+        let mut ctx: CCPContext = CCPContext::new();
+        let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
+        let mut ret = ctx.mk_server_cookie(&mut buf);
+        if ret > 0 {
+            ret = ctx.parse_server_cookie(&buf, ret as usize);
+        }
+        assert!(ret == mem::size_of::<ServerCookie>() as isize);
+    }
+
+    #[test]
+    fn test_server_message() {
+        let mut ctx: CCPContext = CCPContext::new();
+        let mut buf: [u8; CCP_MAX_PACKET_SIZE] = [0; CCP_MAX_PACKET_SIZE];
+        let msg = String::from("TESTTESTTESTTEST").into_bytes();
+        let msg = msg.as_slice();
+        let mut ret = ctx.mk_server_message(&mut buf,
+                                            msg);
+        if ret > 0 {
+            ret = ctx.parse_server_message(&buf, ret as usize);
+        }
+        assert!(ret == 64 + msg.len() as isize);
     }
 }

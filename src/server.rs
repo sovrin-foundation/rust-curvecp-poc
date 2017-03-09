@@ -8,6 +8,9 @@ use std::net::UdpSocket;
 mod libcurvecp;
 use libcurvecp::*;
 
+#[cfg(test)]
+mod tests;
+
 const SECRETKEY:[u8; 32] = [
     0x70, 0x2d, 0x76, 0x4d, 0xe0, 0x54, 0x7c, 0x94,
     0x86, 0x4c, 0x28, 0x97, 0x39, 0xc8, 0xaa, 0xd4,
@@ -38,7 +41,7 @@ fn main() {
     println!("receiving ClientHello");
     let (len, client_ip) = socket.recv_from(&mut buf).unwrap();
     println!("received {} bytes from {}", len, client_ip);
-    if ctx.parse_client_hello(SERVER_EXT, PUBLICKEY, SECRETKEY, &buf, len) < 0 {
+    if ctx.parse_client_hello(&buf, len, PUBLICKEY, SECRETKEY, SERVER_EXT) < 0 {
         println!("client hello parsing failed");
         return;
     }
